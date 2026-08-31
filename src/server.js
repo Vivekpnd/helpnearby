@@ -1,3 +1,4 @@
+
 /* =========================================================
    DNS CONFIGURATION
    ---------------------------------------------------------
@@ -10,7 +11,7 @@ const dns = require("node:dns");
 
 dns.setServers([
   "8.8.8.8",
-  "1.1.1.1"
+  "1.1.1.1",
 ]);
 
 /* =========================================================
@@ -30,11 +31,14 @@ const connectDB = require("./config/db");
    SERVER CONFIGURATION
 ========================================================= */
 
-const PORT =
-  Number(process.env.PORT) || 5000;
+// Render provides process.env.PORT automatically.
+// 5000 is used only for local development.
+const PORT = Number(process.env.PORT) || 5000;
 
-const HOST =
-  process.env.HOST || "localhost";
+// IMPORTANT:
+// Render requires the server to listen on 0.0.0.0.
+// Do NOT use "localhost" here.
+const HOST = "0.0.0.0";
 
 /* =========================================================
    START SERVER
@@ -60,9 +64,7 @@ async function startServer() {
 
     await connectDB();
 
-    console.log(
-      "MongoDB connected successfully."
-    );
+    console.log("MongoDB connected successfully.");
 
     /* -------------------------------------------------------
        Start HTTP server
@@ -87,10 +89,7 @@ async function startServer() {
     ======================================================= */
 
     server.on("error", (error) => {
-      console.error(
-        "HTTP server error:",
-        error
-      );
+      console.error("HTTP server error:", error);
 
       if (error.code === "EADDRINUSE") {
         console.error(
@@ -132,9 +131,7 @@ async function startServer() {
           process.exit(1);
         }
 
-        console.log(
-          "HTTP server closed."
-        );
+        console.log("HTTP server closed.");
 
         process.exit(0);
       });
@@ -150,10 +147,7 @@ async function startServer() {
       () => shutdown("SIGTERM")
     );
   } catch (error) {
-    console.error(
-      "Server startup failed:"
-    );
-
+    console.error("Server startup failed:");
     console.error(error);
 
     process.exit(1);
@@ -165,3 +159,4 @@ async function startServer() {
 ========================================================= */
 
 startServer();
+
