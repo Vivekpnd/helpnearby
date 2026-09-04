@@ -1,3 +1,4 @@
+"use strict";
 
 /* =========================================================
    DNS CONFIGURATION
@@ -27,13 +28,19 @@ require("dotenv").config();
 const app = require("./app");
 const connectDB = require("./config/db");
 
+const {
+  verifyEmailTransport,
+  closeEmailTransport,
+} = require("./services/email.service");
+
 /* =========================================================
    SERVER CONFIGURATION
 ========================================================= */
 
 // Render provides process.env.PORT automatically.
 // 5000 is used only for local development.
-const PORT = Number(process.env.PORT) || 5000;
+const PORT =
+  Number(process.env.PORT) || 5000;
 
 // IMPORTANT:
 // Render requires the server to listen on 0.0.0.0.
@@ -64,7 +71,35 @@ async function startServer() {
 
     await connectDB();
 
-    console.log("MongoDB connected successfully.");
+    console.log(
+      "MongoDB connected successfully."
+    );
+
+    /* -------------------------------------------------------
+       Verify SMTP service
+       -------------------------------------------------------
+       This checks whether the backend can connect to
+       the configured SMTP server.
+
+       It does NOT send a verification email.
+
+       The email service contains explicit connection,
+       greeting and socket timeouts so SMTP cannot hang
+       indefinitely.
+    ------------------------------------------------------- */
+
+    const smtpReady =
+      await verifyEmailTransport();
+
+    if (smtpReady) {
+      console.log(
+        "Email service is ready."
+      );
+    } else {
+      console.error(
+        "Email service is NOT ready. Email-dependent operations may fail."
+      );
+    }
 
     /* -------------------------------------------------------
        Start HTTP server
@@ -88,17 +123,25 @@ async function startServer() {
        SERVER ERROR HANDLER
     ======================================================= */
 
-    server.on("error", (error) => {
-      console.error("HTTP server error:", error);
-
-      if (error.code === "EADDRINUSE") {
+    server.on(
+      "error",
+      (error) => {
         console.error(
-          `Port ${PORT} is already in use.`
+          "HTTP server error:",
+          error
         );
-      }
 
-      process.exit(1);
-    });
+        if (
+          error.code === "EADDRINUSE"
+        ) {
+          console.error(
+            `Port ${PORT} is already in use.`
+          );
+        }
+
+        process.exit(1);
+      }
+    );
 
     /* =======================================================
        GRACEFUL SHUTDOWN
@@ -106,7 +149,9 @@ async function startServer() {
 
     let isShuttingDown = false;
 
-    const shutdown = (signal) => {
+    const shutdown = async (
+      signal
+    ) => {
       if (isShuttingDown) {
         return;
       }
@@ -117,38 +162,117 @@ async function startServer() {
         `\n${signal} received. Shutting down server...`
       );
 
-      if (!server) {
-        process.exit(0);
-      }
+      /* -----------------------------------------------------
+         Close SMTP if HTTP server was never started
+      ----------------------------------------------------- */
 
-      server.close((error) => {
-        if (error) {
+      if (!server) {
+        try {
+          await closeEmailTransport();
+        } catch (error) {
           console.error(
-            "Error while closing HTTP server:",
+            "Error while closing email service:",
             error
           );
-
-          process.exit(1);
         }
 
-        console.log("HTTP server closed.");
-
         process.exit(0);
-      });
+
+        return;
+      }
+
+      /* -----------------------------------------------------
+         Stop accepting new HTTP requests
+      ----------------------------------------------------- */
+
+      server.close(
+        async (error) => {
+          if (error) {
+            console.error(
+              "Error while closing HTTP server:",
+              error
+            );
+
+            try {
+              await closeEmailTransport();
+            } catch (emailError) {
+              console.error(
+                "Error while closing email service:",
+                emailError
+              );
+            }
+
+            process.exit(1);
+
+            return;
+          }
+
+          console.log(
+            "HTTP server closed."
+          );
+
+          /* -------------------------------------------------
+             Close SMTP connection pool
+          ------------------------------------------------- */
+
+          try {
+            await closeEmailTransport();
+
+            console.log(
+              "Email service closed."
+            );
+          } catch (emailError) {
+            console.error(
+              "Error while closing email service:",
+              emailError
+            );
+          }
+
+          process.exit(0);
+        }
+      );
     };
+
+    /* -------------------------------------------------------
+       Handle Ctrl+C
+    ------------------------------------------------------- */
 
     process.once(
       "SIGINT",
-      () => shutdown("SIGINT")
+      () => {
+        void shutdown("SIGINT");
+      }
     );
+
+    /* -------------------------------------------------------
+       Handle Render/server shutdown
+    ------------------------------------------------------- */
 
     process.once(
       "SIGTERM",
-      () => shutdown("SIGTERM")
+      () => {
+        void shutdown("SIGTERM");
+      }
     );
   } catch (error) {
-    console.error("Server startup failed:");
+    console.error(
+      "Server startup failed:"
+    );
+
     console.error(error);
+
+    /* -------------------------------------------------------
+       Cleanup SMTP if startup fails
+    ------------------------------------------------------- */
+
+    try {
+      await closeEmailTransport();
+    } catch (emailError) {
+      console.error(
+        "Error while closing email service:",
+        emailError
+      );
+    }
 
     process.exit(1);
   }
@@ -158,5 +282,5 @@ async function startServer() {
    START APPLICATION
 ========================================================= */
 
-startServer();
+void startServer();
 

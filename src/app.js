@@ -1,228 +1,289 @@
-const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
-const cookieParser = require("cookie-parser");
+"use strict";
 
-const authRoutes = require("./routes/auth.routes");
-const userRoutes = require("./routes/user.routes");
-const helpRequestRoutes = require("./routes/helpRequest.routes");
-const ratingRoutes = require("./routes/rating.routes");
-const rewardRoutes = require("./routes/reward.routes");
-const pointRoutes = require("./routes/point.routes");
+/* =========================================================
+   DNS CONFIGURATION
+   ---------------------------------------------------------
+   Helps resolve MongoDB Atlas SRV records reliably in
+   environments where the default DNS resolver causes
+   connection issues.
+========================================================= */
+
+const dns = require("node:dns");
+
+dns.setServers([
+  "8.8.8.8",
+  "1.1.1.1",
+]);
+
+/* =========================================================
+   ENVIRONMENT CONFIGURATION
+========================================================= */
+
+require("dotenv").config();
+
+/* =========================================================
+   APPLICATION IMPORTS
+========================================================= */
+
+const app = require("./app");
+const connectDB = require("./config/db");
 
 const {
-  authRateLimit
-} = require("./middleware/rateLimit.middleware");
-
-const app = express();
-
-/* =========================================================
-   SECURITY MIDDLEWARE
-========================================================= */
-
-app.use(helmet());
-
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL,
-    credentials: true
-  })
-);
+  verifyEmailTransport,
+  closeEmailTransport,
+} = require("./services/email.service");
 
 /* =========================================================
-   BODY PARSERS
+   SERVER CONFIGURATION
 ========================================================= */
 
-app.use(
-  express.json({
-    limit: "1mb"
-  })
-);
+// Render provides process.env.PORT automatically.
+// 5000 is used only for local development.
+const PORT =
+  Number(process.env.PORT) || 5000;
 
-app.use(
-  express.urlencoded({
-    extended: true
-  })
-);
-
-app.use(cookieParser());
+// IMPORTANT:
+// Render requires the server to listen on 0.0.0.0.
+// Do NOT use "localhost" here.
+const HOST = "0.0.0.0";
 
 /* =========================================================
-   HEALTH CHECK
+   START SERVER
 ========================================================= */
 
-app.get("/api/health", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "Help Platform API is running"
-  });
-});
+async function startServer() {
+  let server;
 
-/* =========================================================
-   API ROUTES
-========================================================= */
+  try {
+    /* -------------------------------------------------------
+       Validate environment configuration
+    ------------------------------------------------------- */
 
-/* =========================================================
-   AUTHENTICATION
+    if (!process.env.MONGO_URI) {
+      throw new Error(
+        "MONGO_URI is not configured in the environment."
+      );
+    }
 
-   /api/auth/...
-========================================================= */
+    /* -------------------------------------------------------
+       Connect to MongoDB
+    ------------------------------------------------------- */
 
-app.use(
-  "/api/auth",
-  authRateLimit,
-  authRoutes
-);
+    await connectDB();
 
-/* =========================================================
-   USERS
+    console.log(
+      "MongoDB connected successfully."
+    );
 
-   /api/users/...
-========================================================= */
+    /* -------------------------------------------------------
+       Verify SMTP configuration
+       -------------------------------------------------------
+       This does NOT send an email.
 
-app.use(
-  "/api/users",
-  userRoutes
-);
+       It verifies that the backend can establish
+       communication with the configured SMTP server.
 
-/* =========================================================
-   HELP REQUESTS
+       The email service itself has connection,
+       greeting and socket timeouts, so a broken SMTP
+       configuration cannot hang the server forever.
+    ------------------------------------------------------- */
 
-   /api/help-requests/...
-========================================================= */
+    const smtpReady =
+      await verifyEmailTransport();
 
-app.use(
-  "/api/help-requests",
-  helpRequestRoutes
-);
+    if (smtpReady) {
+      console.log(
+        "Email service is ready."
+      );
+    } else {
+      /*
+       * Do not stop the entire API when SMTP is
+       * unavailable.
+       *
+       * Other API functionality such as health
+       * checks, authentication routes that do not
+       * require email, and other application APIs
+       * can continue running.
+       *
+       * Email endpoints will return controlled
+       * errors from the email service.
+       */
+      console.error(
+        "Email service is NOT ready. Email-dependent operations may fail."
+      );
+    }
 
-/* =========================================================
-   RATINGS
+    /* -------------------------------------------------------
+       Start HTTP server
+    ------------------------------------------------------- */
 
-   /api/ratings/...
-========================================================= */
+    server = app.listen(
+      PORT,
+      HOST,
+      () => {
+        console.log(
+          `Help Platform API running on http://${HOST}:${PORT}`
+        );
 
-app.use(
-  "/api/ratings",
-  ratingRoutes
-);
+        console.log(
+          `Health check: http://${HOST}:${PORT}/api/health`
+        );
+      }
+    );
 
-/* =========================================================
-   REWARDS
+    /* =======================================================
+       SERVER ERROR HANDLER
+    ======================================================= */
 
-   /api/rewards/...
-========================================================= */
+    server.on(
+      "error",
+      (error) => {
+        console.error(
+          "HTTP server error:",
+          error
+        );
 
-app.use(
-  "/api/rewards",
-  rewardRoutes
-);
+        if (
+          error.code ===
+          "EADDRINUSE"
+        ) {
+          console.error(
+            `Port ${PORT} is already in use.`
+          );
+        }
 
-/* =========================================================
-   POINTS
+        process.exit(1);
+      }
+    );
 
-   /api/points/...
-========================================================= */
+    /* =======================================================
+       GRACEFUL SHUTDOWN
+    ======================================================= */
 
-app.use(
-  "/api/points",
-  pointRoutes
-);
+    let isShuttingDown = false;
 
-/* =========================================================
-   404 - ROUTE NOT FOUND
-========================================================= */
+    const shutdown = async (
+      signal
+    ) => {
+      if (isShuttingDown) {
+        return;
+      }
 
-app.use((req, res) => {
-  return res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`
-  });
-});
+      isShuttingDown = true;
 
-/* =========================================================
-   GLOBAL ERROR HANDLER
-========================================================= */
+      console.log(
+        `\n${signal} received. Shutting down server...`
+      );
 
-app.use((err, req, res, next) => {
-  console.error("API Error:", err);
+      /*
+       * If HTTP server was never started,
+       * still close the SMTP transporter.
+       */
+      if (!server) {
+        try {
+          await closeEmailTransport();
+        } catch (error) {
+          console.error(
+            "Error while closing email service:",
+            error
+          );
+        }
 
-  /* =======================================================
-     MONGOOSE VALIDATION ERROR
-  ======================================================= */
+        process.exit(0);
 
-  if (err.name === "ValidationError") {
-    const errors = {};
+        return;
+      }
 
-    Object.keys(err.errors).forEach((field) => {
-      errors[field] =
-        err.errors[field].message;
-    });
+      /*
+       * Stop accepting new HTTP requests.
+       */
+      server.close(
+        async (error) => {
+          if (error) {
+            console.error(
+              "Error while closing HTTP server:",
+              error
+            );
 
-    return res.status(400).json({
-      success: false,
-      message: "Validation failed.",
-      errors
-    });
+            try {
+              await closeEmailTransport();
+            } catch (emailError) {
+              console.error(
+                "Error while closing email service:",
+                emailError
+              );
+            }
+
+            process.exit(1);
+
+            return;
+          }
+
+          console.log(
+            "HTTP server closed."
+          );
+
+          /*
+           * Close pooled SMTP connections.
+           */
+          try {
+            await closeEmailTransport();
+
+            console.log(
+              "Email service closed."
+            );
+          } catch (emailError) {
+            console.error(
+              "Error while closing email service:",
+              emailError
+            );
+          }
+
+          process.exit(0);
+        }
+      );
+    };
+
+    process.once(
+      "SIGINT",
+      () => {
+        void shutdown("SIGINT");
+      }
+    );
+
+    process.once(
+      "SIGTERM",
+      () => {
+        void shutdown("SIGTERM");
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Server startup failed:"
+    );
+
+    console.error(error);
+
+    /*
+     * Make sure the SMTP transporter is not
+     * left open if startup fails.
+     */
+    try {
+      await closeEmailTransport();
+    } catch (emailError) {
+      console.error(
+        "Error while closing email service:",
+        emailError
+      );
+    }
+
+    process.exit(1);
   }
-
-  /* =======================================================
-     INVALID MONGODB OBJECT ID
-  ======================================================= */
-
-  if (err.name === "CastError") {
-    return res.status(400).json({
-      success: false,
-      message: `Invalid ${err.path}.`
-    });
-  }
-
-  /* =======================================================
-     DUPLICATE MONGODB KEY
-  ======================================================= */
-
-  if (err.code === 11000) {
-    return res.status(409).json({
-      success: false,
-      message:
-        "Duplicate resource already exists."
-    });
-  }
-
-  /* =======================================================
-     DEVELOPMENT ERROR
-  ======================================================= */
-
-  if (
-    process.env.NODE_ENV === "development"
-  ) {
-    return res.status(
-      err.statusCode || 500
-    ).json({
-      success: false,
-      message:
-        err.message ||
-        "Internal server error",
-      stack: err.stack
-    });
-  }
-
-  /* =======================================================
-     PRODUCTION ERROR
-  ======================================================= */
-
-  return res.status(
-    err.statusCode || 500
-  ).json({
-    success: false,
-    message:
-      err.message ||
-      "Internal server error"
-  });
-});
+}
 
 /* =========================================================
-   EXPORT
+   START APPLICATION
 ========================================================= */
 
-module.exports = app;
+void startServer();
+
