@@ -25,7 +25,17 @@ require("dotenv").config();
    APPLICATION IMPORTS
 ========================================================= */
 
+/*
+ * IMPORTANT:
+ * app.js MUST export the Express application itself:
+ *
+ * module.exports = app;
+ *
+ * Do NOT use:
+ * module.exports = { app };
+ */
 const app = require("./app");
+
 const connectDB = require("./config/db");
 
 const {
@@ -37,14 +47,13 @@ const {
    SERVER CONFIGURATION
 ========================================================= */
 
-// Render provides process.env.PORT automatically.
-// 5000 is used only for local development.
+// Render automatically provides process.env.PORT.
+// 5000 is used for local development.
 const PORT =
   Number(process.env.PORT) || 5000;
 
-// IMPORTANT:
-// Render requires the server to listen on 0.0.0.0.
-// Do NOT use "localhost" here.
+// Render requires the application to listen on
+// 0.0.0.0 so it can receive external traffic.
 const HOST = "0.0.0.0";
 
 /* =========================================================
@@ -52,12 +61,12 @@ const HOST = "0.0.0.0";
 ========================================================= */
 
 async function startServer() {
-  let server;
+  let server = null;
 
   try {
-    /* -------------------------------------------------------
-       Validate environment configuration
-    ------------------------------------------------------- */
+    /* =======================================================
+       VALIDATE ENVIRONMENT
+    ======================================================= */
 
     if (!process.env.MONGO_URI) {
       throw new Error(
@@ -65,9 +74,26 @@ async function startServer() {
       );
     }
 
-    /* -------------------------------------------------------
-       Connect to MongoDB
-    ------------------------------------------------------- */
+    /* =======================================================
+       VALIDATE EXPRESS APP
+       -------------------------------------------------------
+       This gives a clear error instead of:
+       "app.listen is not a function"
+    ======================================================= */
+
+    if (
+      typeof app !== "function" ||
+      typeof app.listen !== "function"
+    ) {
+      throw new TypeError(
+        'Invalid Express application exported from "./app". ' +
+        'Make sure app.js ends with: module.exports = app;'
+      );
+    }
+
+    /* =======================================================
+       CONNECT TO MONGODB
+    ======================================================= */
 
     await connectDB();
 
@@ -75,21 +101,24 @@ async function startServer() {
       "MongoDB connected successfully."
     );
 
-    /* -------------------------------------------------------
-       Verify SMTP service
+    /* =======================================================
+       VERIFY SMTP SERVICE
        -------------------------------------------------------
-       This checks whether the backend can connect to
-       the configured SMTP server.
+       This verifies the SMTP connection.
+       It does NOT send an email.
+    ======================================================= */
 
-       It does NOT send a verification email.
+    let smtpReady = false;
 
-       The email service contains explicit connection,
-       greeting and socket timeouts so SMTP cannot hang
-       indefinitely.
-    ------------------------------------------------------- */
-
-    const smtpReady =
-      await verifyEmailTransport();
+    try {
+      smtpReady =
+        await verifyEmailTransport();
+    } catch (smtpError) {
+      console.error(
+        "SMTP verification failed:",
+        smtpError
+      );
+    }
 
     if (smtpReady) {
       console.log(
@@ -101,9 +130,9 @@ async function startServer() {
       );
     }
 
-    /* -------------------------------------------------------
-       Start HTTP server
-    ------------------------------------------------------- */
+    /* =======================================================
+       START HTTP SERVER
+    ======================================================= */
 
     server = app.listen(
       PORT,
@@ -120,7 +149,7 @@ async function startServer() {
     );
 
     /* =======================================================
-       SERVER ERROR HANDLER
+       HTTP SERVER ERROR HANDLER
     ======================================================= */
 
     server.on(
@@ -163,79 +192,55 @@ async function startServer() {
       );
 
       /* -----------------------------------------------------
-         Close SMTP if HTTP server was never started
+         CLOSE HTTP SERVER
       ----------------------------------------------------- */
 
-      if (!server) {
-        try {
-          await closeEmailTransport();
-        } catch (error) {
-          console.error(
-            "Error while closing email service:",
-            error
-          );
-        }
+      if (server) {
+        await new Promise(
+          (resolve) => {
+            server.close(
+              (error) => {
+                if (error) {
+                  console.error(
+                    "Error while closing HTTP server:",
+                    error
+                  );
+                } else {
+                  console.log(
+                    "HTTP server closed."
+                  );
+                }
 
-        process.exit(0);
-
-        return;
+                resolve();
+              }
+            );
+          }
+        );
       }
 
       /* -----------------------------------------------------
-         Stop accepting new HTTP requests
+         CLOSE SMTP TRANSPORT
       ----------------------------------------------------- */
 
-      server.close(
-        async (error) => {
-          if (error) {
-            console.error(
-              "Error while closing HTTP server:",
-              error
-            );
+      try {
+        await closeEmailTransport();
 
-            try {
-              await closeEmailTransport();
-            } catch (emailError) {
-              console.error(
-                "Error while closing email service:",
-                emailError
-              );
-            }
+        console.log(
+          "Email service closed."
+        );
+      } catch (emailError) {
+        console.error(
+          "Error while closing email service:",
+          emailError
+        );
+      }
 
-            process.exit(1);
-
-            return;
-          }
-
-          console.log(
-            "HTTP server closed."
-          );
-
-          /* -------------------------------------------------
-             Close SMTP connection pool
-          ------------------------------------------------- */
-
-          try {
-            await closeEmailTransport();
-
-            console.log(
-              "Email service closed."
-            );
-          } catch (emailError) {
-            console.error(
-              "Error while closing email service:",
-              emailError
-            );
-          }
-
-          process.exit(0);
-        }
-      );
+      process.exit(0);
     };
 
-    /* -------------------------------------------------------
-       Handle Ctrl+C
-    ------------------------------------------------------- */
+    /* =======================================================
+       PROCESS SIGNALS
+    ======================================================= */
 
     process.once(
       "SIGINT",
@@ -244,10 +249,6 @@ async function startServer() {
       }
     );
 
-    /* -------------------------------------------------------
-       Handle Render/server shutdown
-    ------------------------------------------------------- */
-
     process.once(
       "SIGTERM",
       () => {
@@ -255,6 +256,10 @@ async function startServer() {
       }
     );
   } catch (error) {
+    /* =======================================================
+       STARTUP ERROR
+    ======================================================= */
+
     console.error(
       "Server startup failed:"
     );
@@ -262,11 +267,15 @@ async function startServer() {
     console.error(error);
 
     /* -------------------------------------------------------
-       Cleanup SMTP if startup fails
+       CLOSE SMTP IF STARTUP FAILED
     ------------------------------------------------------- */
 
     try {
       await closeEmailTransport();
+
+      console.log(
+        "Email service closed."
+      );
     } catch (emailError) {
       console.error(
         "Error while closing email service:",

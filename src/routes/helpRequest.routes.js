@@ -18,104 +18,109 @@ const {
 
 const router = express.Router();
 
-
-/* =========================================================
-   HELP LIFECYCLE
-========================================================= */
-router.post(
-  "/:id/dispute",
-  raiseDispute
-);
-
-/**
- * ASSIGNED → IN_PROGRESS
- *
- * Only the assigned helper.
+/*
+ * EVERYTHING inside help-request API
+ * requires an authenticated user.
  */
-router.post(
-  "/:id/start",
-  startHelpRequest
-);
-
-/**
- * IN_PROGRESS → AWAITING_CONFIRMATION
- *
- * Only the assigned helper.
- */
-router.post(
-  "/:id/complete",
-  completeHelpRequest
-);
-
-/**
- * AWAITING_CONFIRMATION → COMPLETED
- *
- * Only the requester.
- */
-router.post(
-  "/:id/confirm-complete",
-  confirmHelpCompletion
-);
-
-/* =========================================================
-   CLAIM / ASSIGN
-========================================================= */
-
-
-
-/**
- * POST /api/help-requests/:id/claim
- *
- * Atomically claims a SEARCHING request.
- */
-router.post("/:id/claim", claimHelpRequest);
-
-/* =========================================================
-   AUTHENTICATION
-========================================================= */
-
 router.use(protect);
 
 /* =========================================================
    CREATE
 ========================================================= */
 
-router.post("/", createHelpRequest);
+router.post(
+  "/",
+  createHelpRequest
+);
 
 /* =========================================================
    NEARBY
 ========================================================= */
 
-/**
- * GET /api/help-requests/nearby
- *
- * IMPORTANT:
- * Must be before /:id.
- */
-router.get("/nearby", getNearbyHelpRequests);
+router.get(
+  "/nearby",
+  getNearbyHelpRequests
+);
 
 /* =========================================================
-   MY ACTIVITY
+   MY REQUESTS
 ========================================================= */
 
-router.get("/my", getMyHelpRequests);
+router.get(
+  "/my",
+  getMyHelpRequests
+);
 
 /* =========================================================
-   SINGLE REQUEST
+   CLAIM
 ========================================================= */
 
-router.get("/:id", getHelpRequest);
+router.post(
+  "/:id/claim",
+  claimHelpRequest
+);
+
+/* =========================================================
+   START
+========================================================= */
+
+router.post(
+  "/:id/start",
+  startHelpRequest
+);
+
+/* =========================================================
+   COMPLETE
+========================================================= */
+
+router.post(
+  "/:id/complete",
+  completeHelpRequest
+);
+
+/* =========================================================
+   CONFIRM COMPLETION
+========================================================= */
+
+router.post(
+  "/:id/confirm-complete",
+  confirmHelpCompletion
+);
+
+/* =========================================================
+   DISPUTE
+========================================================= */
+
+router.post(
+  "/:id/dispute",
+  raiseDispute
+);
 
 /* =========================================================
    UPDATE
 ========================================================= */
 
-router.patch("/:id", updateHelpRequest);
+router.patch(
+  "/:id",
+  updateHelpRequest
+);
 
 /* =========================================================
    CANCEL
 ========================================================= */
 
-router.post("/:id/cancel", cancelHelpRequest);
+router.post(
+  "/:id/cancel",
+  cancelHelpRequest
+);
+
+/* =========================================================
+   SINGLE REQUEST
+========================================================= */
+
+router.get(
+  "/:id",
+  getHelpRequest
+);
 
 module.exports = router;

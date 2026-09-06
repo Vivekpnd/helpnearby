@@ -1,289 +1,229 @@
 "use strict";
 
 /* =========================================================
-   DNS CONFIGURATION
-   ---------------------------------------------------------
-   Helps resolve MongoDB Atlas SRV records reliably in
-   environments where the default DNS resolver causes
-   connection issues.
-========================================================= */
-
-const dns = require("node:dns");
-
-dns.setServers([
-  "8.8.8.8",
-  "1.1.1.1",
-]);
-
-/* =========================================================
    ENVIRONMENT CONFIGURATION
 ========================================================= */
 
 require("dotenv").config();
 
 /* =========================================================
-   APPLICATION IMPORTS
+   EXPRESS
 ========================================================= */
 
-const app = require("./app");
-const connectDB = require("./config/db");
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+const authRoutes = require("./routes/auth.routes");
+const userRoutes = require("./routes/user.routes");
+const helpRequestRoutes = require("./routes/helpRequest.routes");
+const ratingRoutes = require("./routes/rating.routes");
+const rewardRoutes = require("./routes/reward.routes");
+const pointRoutes = require("./routes/point.routes");
+const uploadRoutes = require("./routes/upload.routes");
+
+/* =========================================================
+   MIDDLEWARE
+========================================================= */
 
 const {
-  verifyEmailTransport,
-  closeEmailTransport,
-} = require("./services/email.service");
+  authRateLimit,
+} = require("./middleware/rateLimit.middleware");
 
 /* =========================================================
-   SERVER CONFIGURATION
+   APP
 ========================================================= */
 
-// Render provides process.env.PORT automatically.
-// 5000 is used only for local development.
-const PORT =
-  Number(process.env.PORT) || 5000;
-
-// IMPORTANT:
-// Render requires the server to listen on 0.0.0.0.
-// Do NOT use "localhost" here.
-const HOST = "0.0.0.0";
+const app = express();
 
 /* =========================================================
-   START SERVER
+   SECURITY
 ========================================================= */
 
-async function startServer() {
-  let server;
+app.use(
+  helmet()
+);
 
-  try {
-    /* -------------------------------------------------------
-       Validate environment configuration
-    ------------------------------------------------------- */
+/* =========================================================
+   CORS
+========================================================= */
 
-    if (!process.env.MONGO_URI) {
-      throw new Error(
-        "MONGO_URI is not configured in the environment."
-      );
-    }
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "*",
+    credentials: true,
+  })
+);
 
-    /* -------------------------------------------------------
-       Connect to MongoDB
-    ------------------------------------------------------- */
+/* =========================================================
+   BODY PARSING
+========================================================= */
 
-    await connectDB();
+app.use(
+  express.json({
+    limit: "1mb",
+  })
+);
 
-    console.log(
-      "MongoDB connected successfully."
-    );
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "1mb",
+  })
+);
 
-    /* -------------------------------------------------------
-       Verify SMTP configuration
-       -------------------------------------------------------
-       This does NOT send an email.
+/* =========================================================
+   COOKIES
+========================================================= */
 
-       It verifies that the backend can establish
-       communication with the configured SMTP server.
+app.use(
+  cookieParser()
+);
 
-       The email service itself has connection,
-       greeting and socket timeouts, so a broken SMTP
-       configuration cannot hang the server forever.
-    ------------------------------------------------------- */
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
 
-    const smtpReady =
-      await verifyEmailTransport();
+app.get(
+  "/api/health",
+  (req, res) => {
+    res.status(200).json({
+      success: true,
+      message: "Help Platform API is running",
+    });
+  }
+);
 
-    if (smtpReady) {
-      console.log(
-        "Email service is ready."
-      );
-    } else {
-      /*
-       * Do not stop the entire API when SMTP is
-       * unavailable.
-       *
-       * Other API functionality such as health
-       * checks, authentication routes that do not
-       * require email, and other application APIs
-       * can continue running.
-       *
-       * Email endpoints will return controlled
-       * errors from the email service.
-       */
-      console.error(
-        "Email service is NOT ready. Email-dependent operations may fail."
-      );
-    }
+/* =========================================================
+   API ROUTES
+========================================================= */
 
-    /* -------------------------------------------------------
-       Start HTTP server
-    ------------------------------------------------------- */
+/*
+ * Authentication
+ */
+app.use(
+  "/api/auth",
+  authRateLimit,
+  authRoutes
+);
 
-    server = app.listen(
-      PORT,
-      HOST,
-      () => {
-        console.log(
-          `Help Platform API running on http://${HOST}:${PORT}`
-        );
+/*
+ * Users
+ */
+app.use(
+  "/api/users",
+  userRoutes
+);
 
-        console.log(
-          `Health check: http://${HOST}:${PORT}/api/health`
-        );
-      }
-    );
+/*
+ * Help Requests
+ */
+app.use(
+  "/api/help-requests",
+  helpRequestRoutes
+);
 
-    /* =======================================================
-       SERVER ERROR HANDLER
-    ======================================================= */
+/*
+ * Ratings
+ */
+app.use(
+  "/api/ratings",
+  ratingRoutes
+);
 
-    server.on(
-      "error",
-      (error) => {
-        console.error(
-          "HTTP server error:",
-          error
-        );
+/*
+ * Rewards
+ */
+app.use(
+  "/api/rewards",
+  rewardRoutes
+);
 
-        if (
-          error.code ===
-          "EADDRINUSE"
-        ) {
-          console.error(
-            `Port ${PORT} is already in use.`
-          );
-        }
+/*
+ * Points
+ */
+app.use(
+  "/api/points",
+  pointRoutes
+);
 
-        process.exit(1);
-      }
-    );
+/*
+ * Image Uploads
+ *
+ * POST /api/uploads/image
+ */
+app.use(
+  "/api/uploads",
+  uploadRoutes
+);
 
-    /* =======================================================
-       GRACEFUL SHUTDOWN
-    ======================================================= */
+/* =========================================================
+   404 HANDLER
+========================================================= */
 
-    let isShuttingDown = false;
+app.use(
+  (req, res) => {
+    res.status(404).json({
+      success: false,
+      message: `Route not found: ${req.method} ${req.originalUrl}`,
+    });
+  }
+);
 
-    const shutdown = async (
-      signal
-    ) => {
-      if (isShuttingDown) {
-        return;
-      }
+/* =========================================================
+   GLOBAL ERROR HANDLER
+========================================================= */
 
-      isShuttingDown = true;
-
-      console.log(
-        `\n${signal} received. Shutting down server...`
-      );
-
-      /*
-       * If HTTP server was never started,
-       * still close the SMTP transporter.
-       */
-      if (!server) {
-        try {
-          await closeEmailTransport();
-        } catch (error) {
-          console.error(
-            "Error while closing email service:",
-            error
-          );
-        }
-
-        process.exit(0);
-
-        return;
-      }
-
-      /*
-       * Stop accepting new HTTP requests.
-       */
-      server.close(
-        async (error) => {
-          if (error) {
-            console.error(
-              "Error while closing HTTP server:",
-              error
-            );
-
-            try {
-              await closeEmailTransport();
-            } catch (emailError) {
-              console.error(
-                "Error while closing email service:",
-                emailError
-              );
-            }
-
-            process.exit(1);
-
-            return;
-          }
-
-          console.log(
-            "HTTP server closed."
-          );
-
-          /*
-           * Close pooled SMTP connections.
-           */
-          try {
-            await closeEmailTransport();
-
-            console.log(
-              "Email service closed."
-            );
-          } catch (emailError) {
-            console.error(
-              "Error while closing email service:",
-              emailError
-            );
-          }
-
-          process.exit(0);
-        }
-      );
-    };
-
-    process.once(
-      "SIGINT",
-      () => {
-        void shutdown("SIGINT");
-      }
-    );
-
-    process.once(
-      "SIGTERM",
-      () => {
-        void shutdown("SIGTERM");
-      }
-    );
-  } catch (error) {
+app.use(
+  (err, req, res, next) => {
     console.error(
-      "Server startup failed:"
+      "Unhandled application error:",
+      err
     );
-
-    console.error(error);
 
     /*
-     * Make sure the SMTP transporter is not
-     * left open if startup fails.
+     * Multer errors
      */
-    try {
-      await closeEmailTransport();
-    } catch (emailError) {
-      console.error(
-        "Error while closing email service:",
-        emailError
-      );
+    if (
+      err &&
+      err.name === "MulterError"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: err.message || "File upload error.",
+      });
     }
 
-    process.exit(1);
+    /*
+     * Generic application errors
+     */
+    const statusCode =
+      Number(err?.statusCode) ||
+      Number(err?.status) ||
+      500;
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        err?.message ||
+        "Internal server error.",
+    });
   }
-}
+);
 
 /* =========================================================
-   START APPLICATION
+   EXPORT EXPRESS APP
+   ---------------------------------------------------------
+   IMPORTANT:
+   server.js imports this value and calls:
+
+   app.listen(...)
 ========================================================= */
 
-void startServer();
+module.exports = app;
 

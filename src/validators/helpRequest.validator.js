@@ -1,31 +1,40 @@
 const {
   HELP_CATEGORIES,
   URGENCY_LEVELS,
-  HELP_REQUEST_STATUS
+  HELP_REQUEST_STATUS,
+  DISPUTE_REASONS
 } = require("../constants/helpRequest.constants");
-
-/* =========================================================
-   CREATE VALIDATION
-========================================================= */
 
 function validateCreateHelpRequest(data = {}) {
   const errors = {};
 
   const {
     category,
+    customCategory,
     description,
     photo,
     location,
-    urgency
+    urgency,
+    details
   } = data;
 
   if (
     typeof category !== "string" ||
     !HELP_CATEGORIES.includes(category.trim())
   ) {
-    errors.category = `Category must be one of: ${HELP_CATEGORIES.join(
-      ", "
-    )}.`;
+    errors.category =
+      `Category must be one of: ${HELP_CATEGORIES.join(", ")}.`;
+  }
+
+  if (category === "other") {
+    if (
+      typeof customCategory !== "string" ||
+      customCategory.trim().length < 2 ||
+      customCategory.trim().length > 100
+    ) {
+      errors.customCategory =
+        "Please provide a custom category between 2 and 100 characters.";
+    }
   }
 
   if (
@@ -42,15 +51,24 @@ function validateCreateHelpRequest(data = {}) {
     photo !== null &&
     typeof photo !== "string"
   ) {
-    errors.photo = "Photo must be a valid string or null.";
+    errors.photo =
+      "Photo must be a valid URL or null.";
+  }
+
+  if (
+    details !== undefined &&
+    (typeof details !== "object" ||
+      Array.isArray(details))
+  ) {
+    errors.details =
+      "Details must be an object.";
   }
 
   validateLocation(location, errors);
 
   if (!URGENCY_LEVELS.includes(urgency)) {
-    errors.urgency = `Urgency must be one of: ${URGENCY_LEVELS.join(
-      ", "
-    )}.`;
+    errors.urgency =
+      `Urgency must be one of: ${URGENCY_LEVELS.join(", ")}.`;
   }
 
   return {
@@ -59,17 +77,15 @@ function validateCreateHelpRequest(data = {}) {
   };
 }
 
-/* =========================================================
-   UPDATE VALIDATION
-========================================================= */
-
 function validateUpdateHelpRequest(data = {}) {
   const errors = {};
 
   const allowedFields = [
     "category",
+    "customCategory",
     "description",
     "photo",
+    "details",
     "location",
     "urgency"
   ];
@@ -77,27 +93,43 @@ function validateUpdateHelpRequest(data = {}) {
   const providedFields = Object.keys(data);
 
   if (providedFields.length === 0) {
-    errors.request = "At least one field is required.";
+    errors.request =
+      "At least one field is required.";
   }
 
-  const invalidFields = providedFields.filter(
-    (field) => !allowedFields.includes(field)
-  );
+  const invalidFields =
+    providedFields.filter(
+      field => !allowedFields.includes(field)
+    );
 
   if (invalidFields.length > 0) {
-    errors.fields = `These fields cannot be updated: ${invalidFields.join(
-      ", "
-    )}.`;
+    errors.fields =
+      `These fields cannot be updated: ${invalidFields.join(", ")}.`;
   }
 
   if (data.category !== undefined) {
     if (
       typeof data.category !== "string" ||
-      !HELP_CATEGORIES.includes(data.category.trim())
+      !HELP_CATEGORIES.includes(
+        data.category.trim()
+      )
     ) {
-      errors.category = `Category must be one of: ${HELP_CATEGORIES.join(
-        ", "
-      )}.`;
+      errors.category =
+        `Category must be one of: ${HELP_CATEGORIES.join(", ")}.`;
+    }
+  }
+
+  if (data.customCategory !== undefined) {
+    if (
+      data.customCategory !== null &&
+      (
+        typeof data.customCategory !== "string" ||
+        data.customCategory.trim().length < 2 ||
+        data.customCategory.trim().length > 100
+      )
+    ) {
+      errors.customCategory =
+        "Custom category must be between 2 and 100 characters.";
     }
   }
 
@@ -117,15 +149,25 @@ function validateUpdateHelpRequest(data = {}) {
       data.photo !== null &&
       typeof data.photo !== "string"
     ) {
-      errors.photo = "Photo must be a valid string or null.";
+      errors.photo =
+        "Photo must be a valid URL or null.";
+    }
+  }
+
+  if (data.details !== undefined) {
+    if (
+      typeof data.details !== "object" ||
+      Array.isArray(data.details)
+    ) {
+      errors.details =
+        "Details must be an object.";
     }
   }
 
   if (data.urgency !== undefined) {
     if (!URGENCY_LEVELS.includes(data.urgency)) {
-      errors.urgency = `Urgency must be one of: ${URGENCY_LEVELS.join(
-        ", "
-      )}.`;
+      errors.urgency =
+        `Urgency must be one of: ${URGENCY_LEVELS.join(", ")}.`;
     }
   }
 
@@ -139,12 +181,11 @@ function validateUpdateHelpRequest(data = {}) {
   };
 }
 
-/* =========================================================
-   LOCATION VALIDATION
-========================================================= */
-
 function validateLocation(location, errors) {
-  if (!location || typeof location !== "object") {
+  if (
+    !location ||
+    typeof location !== "object"
+  ) {
     errors.location = "Location is required.";
     return;
   }
@@ -171,10 +212,6 @@ function validateLocation(location, errors) {
   }
 }
 
-/* =========================================================
-   QUERY VALIDATION
-========================================================= */
-
 function validateMyRequestsQuery(query = {}) {
   const errors = {};
 
@@ -184,9 +221,8 @@ function validateMyRequestsQuery(query = {}) {
     "all"
   ];
 
-  const allowedStatuses = Object.values(
-    HELP_REQUEST_STATUS
-  );
+  const allowedStatuses =
+    Object.values(HELP_REQUEST_STATUS);
 
   if (
     query.role !== undefined &&
@@ -207,7 +243,10 @@ function validateMyRequestsQuery(query = {}) {
   if (query.page !== undefined) {
     const page = Number(query.page);
 
-    if (!Number.isInteger(page) || page < 1) {
+    if (
+      !Number.isInteger(page) ||
+      page < 1
+    ) {
       errors.page =
         "Page must be a positive integer.";
     }
@@ -232,20 +271,16 @@ function validateMyRequestsQuery(query = {}) {
   };
 }
 
-module.exports = {
-  validateCreateHelpRequest,
-  validateUpdateHelpRequest,
-  validateMyRequestsQuery
-};
-/* =========================================================
-   NEARBY REQUEST QUERY VALIDATION
-========================================================= */
-
 function validateNearbyRequestsQuery(query = {}) {
   const errors = {};
 
-  const radius = Number(query.radius ?? 5000);
-  const limit = Number(query.limit ?? 20);
+  const radius = Number(
+    query.radius ?? 5000
+  );
+
+  const limit = Number(
+    query.limit ?? 20
+  );
 
   if (
     !Number.isFinite(radius) ||
@@ -269,15 +304,16 @@ function validateNearbyRequestsQuery(query = {}) {
     query.category !== undefined &&
     typeof query.category !== "string"
   ) {
-    errors.category = "Category must be a string.";
+    errors.category =
+      "Category must be a string.";
   }
 
   if (
     query.urgency !== undefined &&
-    !["now", "today", "flexible"].includes(query.urgency)
+    !URGENCY_LEVELS.includes(query.urgency)
   ) {
     errors.urgency =
-      "Urgency must be one of: now, today, flexible.";
+      `Urgency must be one of: ${URGENCY_LEVELS.join(", ")}.`;
   }
 
   return {
@@ -285,9 +321,6 @@ function validateNearbyRequestsQuery(query = {}) {
     errors
   };
 }
-const {
-  DISPUTE_REASONS
-} = require("../constants/helpRequest.constants");
 
 function validateDispute(data = {}) {
   const errors = {};

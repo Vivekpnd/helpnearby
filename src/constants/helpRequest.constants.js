@@ -1,11 +1,16 @@
 const HELP_CATEGORIES = Object.freeze([
+  "moving_help",
+  "home_household",
+  "technical_help",
+  "shopping_errands",
+  "elderly_assistance",
+  "pet_help",
+  "transport_pickup",
+  "food_meals",
   "car_wash",
   "puncture_help",
   "form_filling",
-  "grocery_help",
   "delivery_help",
-  "moving_help",
-  "technical_help",
   "other"
 ]);
 

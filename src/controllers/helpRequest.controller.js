@@ -4,33 +4,33 @@ const {
   validateCreateHelpRequest,
   validateUpdateHelpRequest,
   validateMyRequestsQuery,
-  validateNearbyRequestsQuery
+  validateNearbyRequestsQuery,
+  validateDispute
 } = require("../validators/helpRequest.validator");
 
 /* =========================================================
    CREATE
-   POST /api/help-requests
 ========================================================= */
 
 async function createHelpRequest(req, res, next) {
   try {
-    const {
-      isValid,
-      errors
-    } = validateCreateHelpRequest(req.body);
+    const validation =
+      validateCreateHelpRequest(req.body);
 
-    if (!isValid) {
+    if (!validation.isValid) {
       return res.status(400).json({
         success: false,
         message: "Validation failed.",
-        errors
+        errors: validation.errors
       });
     }
 
     const {
       category,
+      customCategory,
       description,
       photo,
+      details,
       location,
       urgency
     } = req.body;
@@ -39,8 +39,10 @@ async function createHelpRequest(req, res, next) {
       await helpRequestService.createHelpRequest({
         requesterId: req.user._id,
         category,
+        customCategory,
         description,
         photo,
+        details,
         location,
         urgency
       });
@@ -60,7 +62,6 @@ async function createHelpRequest(req, res, next) {
 
 /* =========================================================
    GET SINGLE
-   GET /api/help-requests/:id
 ========================================================= */
 
 async function getHelpRequest(req, res, next) {
@@ -91,22 +92,19 @@ async function getHelpRequest(req, res, next) {
 }
 
 /* =========================================================
-   GET MY REQUESTS
-   GET /api/help-requests/my
+   MY REQUESTS
 ========================================================= */
 
 async function getMyHelpRequests(req, res, next) {
   try {
-    const {
-      isValid,
-      errors
-    } = validateMyRequestsQuery(req.query);
+    const validation =
+      validateMyRequestsQuery(req.query);
 
-    if (!isValid) {
+    if (!validation.isValid) {
       return res.status(400).json({
         success: false,
         message: "Invalid query parameters.",
-        errors
+        errors: validation.errors
       });
     }
 
@@ -132,21 +130,18 @@ async function getMyHelpRequests(req, res, next) {
 
 /* =========================================================
    UPDATE
-   PATCH /api/help-requests/:id
 ========================================================= */
 
 async function updateHelpRequest(req, res, next) {
   try {
-    const {
-      isValid,
-      errors
-    } = validateUpdateHelpRequest(req.body);
+    const validation =
+      validateUpdateHelpRequest(req.body);
 
-    if (!isValid) {
+    if (!validation.isValid) {
       return res.status(400).json({
         success: false,
         message: "Validation failed.",
-        errors
+        errors: validation.errors
       });
     }
 
@@ -172,7 +167,6 @@ async function updateHelpRequest(req, res, next) {
 
 /* =========================================================
    CANCEL
-   POST /api/help-requests/:id/cancel
 ========================================================= */
 
 async function cancelHelpRequest(req, res, next) {
@@ -197,33 +191,22 @@ async function cancelHelpRequest(req, res, next) {
 }
 
 /* =========================================================
-   GET NEARBY REQUESTS
-   GET /api/help-requests/nearby
+   NEARBY
 ========================================================= */
 
 async function getNearbyHelpRequests(req, res, next) {
   try {
-    const {
-      isValid,
-      errors
-    } = validateNearbyRequestsQuery(req.query);
+    const validation =
+      validateNearbyRequestsQuery(req.query);
 
-    if (!isValid) {
+    if (!validation.isValid) {
       return res.status(400).json({
         success: false,
         message:
           "Invalid nearby request parameters.",
-        errors
+        errors: validation.errors
       });
     }
-
-    /*
-     * Helper coordinates come from the authenticated
-     * user's profile/location.
-     *
-     * We never accept requesterId/location ownership
-     * information from the client.
-     */
 
     const user = req.user;
 
@@ -246,20 +229,16 @@ async function getNearbyHelpRequests(req, res, next) {
       latitude
     ] = user.location.coordinates;
 
-    const radius = Number(
-      req.query.radius || 5000
-    );
-
-    const limit = Number(
-      req.query.limit || 20
-    );
-
     const requests =
       await helpRequestService.getNearbyHelpRequests({
         latitude,
         longitude,
-        radius,
-        limit,
+        radius: Number(
+          req.query.radius || 5000
+        ),
+        limit: Number(
+          req.query.limit || 20
+        ),
         category: req.query.category,
         urgency: req.query.urgency
       });
@@ -272,7 +251,9 @@ async function getNearbyHelpRequests(req, res, next) {
         requests,
         meta: {
           count: requests.length,
-          radius,
+          radius: Number(
+            req.query.radius || 5000
+          ),
           unit: "meters"
         }
       }
@@ -283,8 +264,7 @@ async function getNearbyHelpRequests(req, res, next) {
 }
 
 /* =========================================================
-   CLAIM HELP REQUEST
-   POST /api/help-requests/:id/claim
+   CLAIM
 ========================================================= */
 
 async function claimHelpRequest(req, res, next) {
@@ -309,8 +289,7 @@ async function claimHelpRequest(req, res, next) {
 }
 
 /* =========================================================
-   START HELP
-   POST /api/help-requests/:id/start
+   START
 ========================================================= */
 
 async function startHelpRequest(req, res, next) {
@@ -335,8 +314,7 @@ async function startHelpRequest(req, res, next) {
 }
 
 /* =========================================================
-   COMPLETE HELP
-   POST /api/help-requests/:id/complete
+   COMPLETE
 ========================================================= */
 
 async function completeHelpRequest(req, res, next) {
@@ -361,8 +339,7 @@ async function completeHelpRequest(req, res, next) {
 }
 
 /* =========================================================
-   CONFIRM COMPLETION
-   POST /api/help-requests/:id/confirm-complete
+   CONFIRM COMPLETE
 ========================================================= */
 
 async function confirmHelpCompletion(
@@ -391,58 +368,33 @@ async function confirmHelpCompletion(
 }
 
 /* =========================================================
-   RAISE DISPUTE
-   POST /api/help-requests/:id/dispute
+   DISPUTE
 ========================================================= */
 
 async function raiseDispute(req, res, next) {
   try {
+    const validation =
+      validateDispute(req.body);
+
+    if (!validation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid dispute.",
+        errors: validation.errors
+      });
+    }
+
     const {
       reason,
       description
     } = req.body;
 
-    /* -------------------------------------------------------
-       Basic validation
-    ------------------------------------------------------- */
-
-    if (
-      !reason ||
-      typeof reason !== "string" ||
-      !reason.trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Dispute reason is required."
-      });
-    }
-
-    if (
-      !description ||
-      typeof description !== "string" ||
-      !description.trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Dispute description is required."
-      });
-    }
-
-    /* -------------------------------------------------------
-       Delegate business logic to service
-    ------------------------------------------------------- */
-
     const helpRequest =
       await helpRequestService.raiseDispute({
         requestId: req.params.id,
-
         userId: req.user._id,
-
-        reason: reason.trim(),
-
-        description: description.trim()
+        reason,
+        description
       });
 
     return res.status(200).json({
@@ -457,10 +409,6 @@ async function raiseDispute(req, res, next) {
     next(error);
   }
 }
-
-/* =========================================================
-   EXPORTS
-========================================================= */
 
 module.exports = {
   createHelpRequest,

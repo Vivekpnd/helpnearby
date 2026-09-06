@@ -13,30 +13,59 @@ const {
 async function createHelpRequest({
   requesterId,
   category,
+  customCategory,
   description,
   photo,
+  details,
   location,
   urgency
 }) {
-  const helpRequest = await HelpRequest.create({
-    requesterId,
-    category: category.trim(),
-    description: description.trim(),
-    photo: photo ? photo.trim() : null,
+  const helpRequest =
+    await HelpRequest.create({
+      requesterId,
 
-    location: {
-      type: "Point",
-      coordinates: [
-        Number(location.longitude),
-        Number(location.latitude)
-      ]
-    },
+      category: category.trim(),
 
-    urgency,
+      customCategory:
+        category === "other"
+          ? customCategory?.trim()
+          : null,
 
-    // Backend controls initial status.
-    status: HELP_REQUEST_STATUS.SEARCHING
-  });
+      description:
+        description.trim(),
+
+      photo:
+        photo
+          ? photo.trim()
+          : null,
+
+      details:
+        details &&
+        typeof details === "object"
+          ? details
+          : {},
+
+      location: {
+        type: "Point",
+
+        /*
+         * GeoJSON is always:
+         * [longitude, latitude]
+         */
+        coordinates: [
+          Number(location.longitude),
+          Number(location.latitude)
+        ]
+      },
+
+      urgency,
+
+      /*
+       * Client cannot control this.
+       */
+      status:
+        HELP_REQUEST_STATUS.SEARCHING
+    });
 
   return helpRequest;
 }
@@ -47,21 +76,26 @@ async function createHelpRequest({
 
 async function getHelpRequestById(requestId) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
-  const helpRequest = await HelpRequest.findById(requestId)
-    .populate(
-      "requesterId",
-      "username email name profilePhoto rating completedHelps helpPoints"
-    )
-    .populate(
-      "helperId",
-      "username name profilePhoto rating completedHelps helpPoints"
-    )
-    .lean();
+  const helpRequest =
+    await HelpRequest.findById(requestId)
+      .populate(
+        "requesterId",
+        "username email name profilePhoto rating completedHelps helpPoints"
+      )
+      .populate(
+        "helperId",
+        "username name profilePhoto rating completedHelps helpPoints"
+      )
+      .lean();
 
   return helpRequest;
 }
@@ -96,8 +130,12 @@ async function getMyHelpRequests({
     filter.helperId = userId;
   } else {
     filter.$or = [
-      { requesterId: userId },
-      { helperId: userId }
+      {
+        requesterId: userId
+      },
+      {
+        helperId: userId
+      }
     ];
   }
 
@@ -105,15 +143,22 @@ async function getMyHelpRequests({
     filter.status = status;
   }
 
-  const pageNumber = Math.max(Number(page), 1);
-  const pageLimit = Math.min(
-    Math.max(Number(limit), 1),
-    100
-  );
+  const pageNumber =
+    Math.max(Number(page), 1);
 
-  const skip = (pageNumber - 1) * pageLimit;
+  const pageLimit =
+    Math.min(
+      Math.max(Number(limit), 1),
+      100
+    );
 
-  const [requests, total] = await Promise.all([
+  const skip =
+    (pageNumber - 1) * pageLimit;
+
+  const [
+    requests,
+    total
+  ] = await Promise.all([
     HelpRequest.find(filter)
       .populate(
         "requesterId",
@@ -123,7 +168,9 @@ async function getMyHelpRequests({
         "helperId",
         "username name profilePhoto rating"
       )
-      .sort({ createdAt: -1 })
+      .sort({
+        createdAt: -1
+      })
       .skip(skip)
       .limit(pageLimit)
       .lean(),
@@ -138,9 +185,14 @@ async function getMyHelpRequests({
       page: pageNumber,
       limit: pageLimit,
       total,
-      totalPages: Math.ceil(total / pageLimit),
-      hasNextPage: pageNumber * pageLimit < total,
-      hasPreviousPage: pageNumber > 1
+      totalPages:
+        Math.ceil(
+          total / pageLimit
+        ),
+      hasNextPage:
+        pageNumber * pageLimit < total,
+      hasPreviousPage:
+        pageNumber > 1
     }
   };
 }
@@ -155,8 +207,12 @@ async function updateHelpRequest({
   updates
 }) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
@@ -167,11 +223,13 @@ async function updateHelpRequest({
    * cannot modify the core request information.
    */
 
-  const helpRequest = await HelpRequest.findOne({
-    _id: requestId,
-    requesterId,
-    status: HELP_REQUEST_STATUS.SEARCHING
-  });
+  const helpRequest =
+    await HelpRequest.findOne({
+      _id: requestId,
+      requesterId,
+      status:
+        HELP_REQUEST_STATUS.SEARCHING
+    });
 
   if (!helpRequest) {
     const error = new Error(
@@ -179,36 +237,125 @@ async function updateHelpRequest({
     );
 
     error.statusCode = 404;
+
     throw error;
   }
 
+  /* -------------------------------------------------------
+     CATEGORY
+  ------------------------------------------------------- */
+
   if (updates.category !== undefined) {
-    helpRequest.category = updates.category.trim();
+    helpRequest.category =
+      updates.category.trim();
   }
+
+  /* -------------------------------------------------------
+     DESCRIPTION
+  ------------------------------------------------------- */
 
   if (updates.description !== undefined) {
-    helpRequest.description = updates.description.trim();
+    helpRequest.description =
+      updates.description.trim();
   }
+
+  /* -------------------------------------------------------
+     PHOTO
+  ------------------------------------------------------- */
 
   if (updates.photo !== undefined) {
-    helpRequest.photo = updates.photo
-      ? updates.photo.trim()
-      : null;
+    helpRequest.photo =
+      updates.photo
+        ? updates.photo.trim()
+        : null;
   }
 
+  /* -------------------------------------------------------
+     URGENCY
+  ------------------------------------------------------- */
+
   if (updates.urgency !== undefined) {
-    helpRequest.urgency = updates.urgency;
+    helpRequest.urgency =
+      updates.urgency;
   }
+
+  /* -------------------------------------------------------
+     CUSTOM CATEGORY
+     -------------------------------------------------------
+     "other" requires a custom category.
+
+     Important:
+     If category is not included in this update,
+     use the existing helpRequest.category.
+  ------------------------------------------------------- */
+
+  if (updates.customCategory !== undefined) {
+    const category =
+      updates.category !== undefined
+        ? updates.category.trim()
+        : helpRequest.category;
+
+    helpRequest.customCategory =
+      category === "other"
+        ? (
+            updates.customCategory
+              ? updates.customCategory.trim()
+              : null
+          )
+        : null;
+  }
+
+  /*
+   * If category changes away from "other",
+   * automatically remove the old custom category.
+   *
+   * This prevents stale customCategory data.
+   */
+  if (
+    updates.category !== undefined &&
+    updates.category.trim() !== "other"
+  ) {
+    helpRequest.customCategory = null;
+  }
+
+  /* -------------------------------------------------------
+     DETAILS
+     ------------------------------------------------------- */
+
+  if (updates.details !== undefined) {
+    helpRequest.details =
+      updates.details &&
+      typeof updates.details === "object"
+        ? updates.details
+        : {};
+  }
+
+  /* -------------------------------------------------------
+     LOCATION
+  ------------------------------------------------------- */
 
   if (updates.location !== undefined) {
     helpRequest.location = {
       type: "Point",
+
+      /*
+       * GeoJSON:
+       * [longitude, latitude]
+       */
       coordinates: [
-        Number(updates.location.longitude),
-        Number(updates.location.latitude)
+        Number(
+          updates.location.longitude
+        ),
+        Number(
+          updates.location.latitude
+        )
       ]
     };
   }
+
+  /* -------------------------------------------------------
+     SAVE
+  ------------------------------------------------------- */
 
   await helpRequest.save();
 
@@ -224,31 +371,35 @@ async function cancelHelpRequest({
   userId
 }) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
   /*
-   * Phase 2 rule:
+   * Requester can cancel while:
    *
-   * Requester can cancel while SEARCHING.
-   *
-   * We are intentionally not allowing arbitrary
-   * cancellation after assignment at this stage.
+   * SEARCHING
+   * ASSIGNED
+   * IN_PROGRESS
    */
 
-  const helpRequest = await HelpRequest.findOne({
-    _id: requestId,
-    requesterId: userId,
-    status: {
-      $in: [
-        HELP_REQUEST_STATUS.SEARCHING,
-        HELP_REQUEST_STATUS.ASSIGNED,
-        HELP_REQUEST_STATUS.IN_PROGRESS
-      ]
-    }
-  });
+  const helpRequest =
+    await HelpRequest.findOne({
+      _id: requestId,
+      requesterId: userId,
+      status: {
+        $in: [
+          HELP_REQUEST_STATUS.SEARCHING,
+          HELP_REQUEST_STATUS.ASSIGNED,
+          HELP_REQUEST_STATUS.IN_PROGRESS
+        ]
+      }
+    });
 
   if (!helpRequest) {
     const error = new Error(
@@ -256,11 +407,15 @@ async function cancelHelpRequest({
     );
 
     error.statusCode = 409;
+
     throw error;
   }
 
-  helpRequest.status = HELP_REQUEST_STATUS.CANCELLED;
-  helpRequest.cancelledAt = new Date();
+  helpRequest.status =
+    HELP_REQUEST_STATUS.CANCELLED;
+
+  helpRequest.cancelledAt =
+    new Date();
 
   await helpRequest.save();
 
@@ -280,134 +435,177 @@ async function getNearbyHelpRequests({
   urgency
 }) {
   const matchStage = {
-    status: HELP_REQUEST_STATUS.SEARCHING
+    status:
+      HELP_REQUEST_STATUS.SEARCHING
   };
 
   /*
    * Category filtering is optional.
-   *
-   * If the helper selects a category,
-   * only matching requests are returned.
    */
+
   if (category) {
-    matchStage.category = category;
+    matchStage.category =
+      category;
   }
 
   /*
    * Urgency filtering is optional.
    */
+
   if (urgency) {
-    matchStage.urgency = urgency;
+    matchStage.urgency =
+      urgency;
   }
 
-  const requests = await HelpRequest.aggregate([
-    /* =====================================================
-       GEO SEARCH
-    ===================================================== */
+  const requests =
+    await HelpRequest.aggregate([
+      /* =====================================================
+         GEO SEARCH
+      ===================================================== */
 
-    {
-      $geoNear: {
-        near: {
-          type: "Point",
-          coordinates: [
-            Number(longitude),
-            Number(latitude)
-          ]
-        },
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
 
-        key: "location",
+            coordinates: [
+              Number(longitude),
+              Number(latitude)
+            ]
+          },
 
-        distanceField: "distance",
+          key: "location",
 
-        spherical: true,
+          distanceField:
+            "distance",
 
-        maxDistance: Number(radius),
+          spherical: true,
 
-        query: matchStage
-      }
-    },
+          maxDistance:
+            Number(radius),
 
-    /* =====================================================
-       LIMIT RESULTS
-    ===================================================== */
+          query: matchStage
+        }
+      },
 
-    {
-      $limit: Number(limit)
-    },
+      /* =====================================================
+         LIMIT RESULTS
+      ===================================================== */
 
-    /* =====================================================
-       CONVERT METERS TO KILOMETERS
-    ===================================================== */
+      {
+        $limit:
+          Number(limit)
+      },
 
-    {
-      $addFields: {
-        distanceKm: {
-          $round: [
-            {
-              $divide: ["$distance", 1000]
-            },
-            2
-          ]
+      /* =====================================================
+         CONVERT METERS TO KILOMETERS
+      ===================================================== */
+
+      {
+        $addFields: {
+          distanceKm: {
+            $round: [
+              {
+                $divide: [
+                  "$distance",
+                  1000
+                ]
+              },
+              2
+            ]
+          }
+        }
+      },
+
+      /* =====================================================
+         REQUESTER INFORMATION
+      ===================================================== */
+
+      {
+        $lookup: {
+          from: "users",
+
+          localField:
+            "requesterId",
+
+          foreignField:
+            "_id",
+
+          as: "requester"
+        }
+      },
+
+      {
+        $unwind: {
+          path:
+            "$requester",
+
+          preserveNullAndEmptyArrays:
+            true
+        }
+      },
+
+      /* =====================================================
+         RESPONSE FIELDS
+      ===================================================== */
+
+      {
+        $project: {
+          requesterId: 1,
+          helperId: 1,
+
+          category: 1,
+
+          /*
+           * Required for "Other" requests.
+           */
+          customCategory: 1,
+
+          description: 1,
+
+          photo: 1,
+
+          /*
+           * Category-specific information.
+           */
+          details: 1,
+
+          location: 1,
+
+          urgency: 1,
+
+          status: 1,
+
+          createdAt: 1,
+
+          distance: {
+            $round: [
+              "$distance",
+              0
+            ]
+          },
+
+          distanceKm: 1,
+
+          requester: {
+            _id:
+              "$requester._id",
+
+            username:
+              "$requester.username",
+
+            name:
+              "$requester.name",
+
+            profilePhoto:
+              "$requester.profilePhoto",
+
+            rating:
+              "$requester.rating"
+          }
         }
       }
-    },
-
-    /* =====================================================
-       REQUESTER INFORMATION
-    ===================================================== */
-
-    {
-      $lookup: {
-        from: "users",
-        localField: "requesterId",
-        foreignField: "_id",
-        as: "requester"
-      }
-    },
-
-    {
-      $unwind: {
-        path: "$requester",
-        preserveNullAndEmptyArrays: true
-      }
-    },
-
-    /* =====================================================
-       RESPONSE FIELDS
-    ===================================================== */
-
-    {
-      $project: {
-        requesterId: 1,
-        helperId: 1,
-
-        category: 1,
-        description: 1,
-        photo: 1,
-
-        location: 1,
-
-        urgency: 1,
-        status: 1,
-
-        createdAt: 1,
-
-        distance: {
-          $round: ["$distance", 0]
-        },
-
-        distanceKm: 1,
-
-        requester: {
-          _id: "$requester._id",
-          username: "$requester.username",
-          name: "$requester.name",
-          profilePhoto: "$requester.profilePhoto",
-          rating: "$requester.rating"
-        }
-      }
-    }
-  ]);
+    ]);
 
   return requests;
 }
@@ -441,22 +639,8 @@ async function claimHelpRequest({
   }
 
   /*
-   * =======================================================
-   * IMPORTANT
-   * =======================================================
-   *
-   * We intentionally do NOT:
-   *
-   * 1. find request
-   * 2. check SEARCHING
-   * 3. modify request
-   *
-   * separately.
-   *
-   * That would create a race condition.
-   *
-   * Instead, status=SEARCHING is part of the MongoDB
-   * update filter itself.
+   * status=SEARCHING is part of the MongoDB
+   * update filter to prevent race conditions.
    */
 
   const claimedRequest =
@@ -468,14 +652,16 @@ async function claimHelpRequest({
           HELP_REQUEST_STATUS.SEARCHING,
 
         /*
-         * A requester cannot claim their own request.
+         * A requester cannot claim their
+         * own request.
          */
         requesterId: {
           $ne: helperId
         },
 
         /*
-         * Request must not already have a helper.
+         * Request must not already have
+         * a helper.
          */
         helperId: null
       },
@@ -487,17 +673,14 @@ async function claimHelpRequest({
           status:
             HELP_REQUEST_STATUS.ASSIGNED,
 
-          claimedAt: new Date()
+          claimedAt:
+            new Date()
         }
       },
 
       {
         new: true,
 
-        /*
-         * Ensures mongoose returns the updated
-         * document rather than the previous one.
-         */
         runValidators: true
       }
     )
@@ -510,17 +693,6 @@ async function claimHelpRequest({
         "username name profilePhoto rating completedHelps"
       );
 
-  /*
-   * No document modified means the request was not
-   * claimable.
-   *
-   * This can happen because:
-   *
-   * - request does not exist
-   * - already claimed
-   * - no longer SEARCHING
-   * - requester attempted self-claim
-   */
   if (!claimedRequest) {
     const error = new Error(
       "Help request is no longer available for claiming."
@@ -544,8 +716,12 @@ async function startHelpRequest({
   helperId
 }) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
@@ -554,14 +730,21 @@ async function startHelpRequest({
       {
         _id: requestId,
         helperId,
-        status: HELP_REQUEST_STATUS.ASSIGNED
+
+        status:
+          HELP_REQUEST_STATUS.ASSIGNED
       },
+
       {
         $set: {
-          status: HELP_REQUEST_STATUS.IN_PROGRESS,
-          startedAt: new Date()
+          status:
+            HELP_REQUEST_STATUS.IN_PROGRESS,
+
+          startedAt:
+            new Date()
         }
       },
+
       {
         new: true,
         runValidators: true
@@ -582,6 +765,7 @@ async function startHelpRequest({
     );
 
     error.statusCode = 409;
+
     throw error;
   }
 
@@ -598,8 +782,12 @@ async function completeHelpRequest({
   helperId
 }) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
@@ -607,17 +795,23 @@ async function completeHelpRequest({
     await HelpRequest.findOneAndUpdate(
       {
         _id: requestId,
+
         helperId,
-        status: HELP_REQUEST_STATUS.IN_PROGRESS
+
+        status:
+          HELP_REQUEST_STATUS.IN_PROGRESS
       },
+
       {
         $set: {
           status:
             HELP_REQUEST_STATUS.AWAITING_CONFIRMATION,
 
-          completedAt: new Date()
+          completedAt:
+            new Date()
         }
       },
+
       {
         new: true,
         runValidators: true
@@ -638,6 +832,7 @@ async function completeHelpRequest({
     );
 
     error.statusCode = 409;
+
     throw error;
   }
 
@@ -654,8 +849,12 @@ async function confirmHelpCompletion({
   requesterId
 }) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
@@ -663,18 +862,23 @@ async function confirmHelpCompletion({
     await HelpRequest.findOneAndUpdate(
       {
         _id: requestId,
+
         requesterId,
+
         status:
           HELP_REQUEST_STATUS.AWAITING_CONFIRMATION
       },
+
       {
         $set: {
           status:
             HELP_REQUEST_STATUS.COMPLETED,
 
-          confirmedAt: new Date()
+          confirmedAt:
+            new Date()
         }
       },
+
       {
         new: true,
         runValidators: true
@@ -695,11 +899,13 @@ async function confirmHelpCompletion({
     );
 
     error.statusCode = 409;
+
     throw error;
   }
 
   return helpRequest;
 }
+
 /* =========================================================
    RAISE DISPUTE
 ========================================================= */
@@ -711,27 +917,36 @@ async function raiseDispute({
   description
 }) {
   if (!mongoose.Types.ObjectId.isValid(requestId)) {
-    const error = new Error("Invalid help request ID.");
+    const error = new Error(
+      "Invalid help request ID."
+    );
+
     error.statusCode = 400;
+
     throw error;
   }
 
-  const helpRequest = await HelpRequest.findOne({
-    _id: requestId,
+  const helpRequest =
+    await HelpRequest.findOne({
+      _id: requestId,
 
-    $or: [
-      { requesterId: userId },
-      { helperId: userId }
-    ],
+      $or: [
+        {
+          requesterId: userId
+        },
+        {
+          helperId: userId
+        }
+      ],
 
-    status: {
-      $in: [
-        HELP_REQUEST_STATUS.IN_PROGRESS,
-        HELP_REQUEST_STATUS.AWAITING_CONFIRMATION,
-        HELP_REQUEST_STATUS.COMPLETED
-      ]
-    }
-  });
+      status: {
+        $in: [
+          HELP_REQUEST_STATUS.IN_PROGRESS,
+          HELP_REQUEST_STATUS.AWAITING_CONFIRMATION,
+          HELP_REQUEST_STATUS.COMPLETED
+        ]
+      }
+    });
 
   if (!helpRequest) {
     const error = new Error(
@@ -739,15 +954,19 @@ async function raiseDispute({
     );
 
     error.statusCode = 409;
+
     throw error;
   }
 
-  if (helpRequest.dispute?.isDisputed) {
+  if (
+    helpRequest.dispute?.isDisputed
+  ) {
     const error = new Error(
       "A dispute has already been raised for this request."
     );
 
     error.statusCode = 409;
+
     throw error;
   }
 
@@ -756,17 +975,30 @@ async function raiseDispute({
 
   helpRequest.dispute = {
     isDisputed: true,
+
     reason,
-    description: description.trim(),
-    raisedBy: userId,
-    status: "OPEN",
-    createdAt: new Date()
+
+    description:
+      description.trim(),
+
+    raisedBy:
+      userId,
+
+    status:
+      "OPEN",
+
+    createdAt:
+      new Date()
   };
 
   await helpRequest.save();
 
   return helpRequest;
 }
+
+/* =========================================================
+   EXPORTS
+========================================================= */
 
 module.exports = {
   createHelpRequest,
