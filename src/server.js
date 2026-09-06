@@ -34,6 +34,7 @@ require("dotenv").config();
  * Do NOT use:
  * module.exports = { app };
  */
+
 const app = require("./app");
 
 const connectDB = require("./config/db");
@@ -47,13 +48,20 @@ const {
    SERVER CONFIGURATION
 ========================================================= */
 
-// Render automatically provides process.env.PORT.
-// 5000 is used for local development.
-const PORT =
-  Number(process.env.PORT) || 5000;
+/*
+ * Render automatically provides process.env.PORT.
+ *
+ * For local development:
+ * PORT=5000
+ */
 
-// Render requires the application to listen on
-// 0.0.0.0 so it can receive external traffic.
+const PORT = Number(process.env.PORT) || 5000;
+
+/*
+ * Render requires the server to listen on
+ * 0.0.0.0 so external traffic can reach it.
+ */
+
 const HOST = "0.0.0.0";
 
 /* =========================================================
@@ -77,7 +85,7 @@ async function startServer() {
     /* =======================================================
        VALIDATE EXPRESS APP
        -------------------------------------------------------
-       This gives a clear error instead of:
+       Prevents:
        "app.listen is not a function"
     ======================================================= */
 
@@ -87,7 +95,7 @@ async function startServer() {
     ) {
       throw new TypeError(
         'Invalid Express application exported from "./app". ' +
-        'Make sure app.js ends with: module.exports = app;'
+        "Make sure app.js ends with: module.exports = app;"
       );
     }
 
@@ -102,31 +110,36 @@ async function startServer() {
     );
 
     /* =======================================================
-       VERIFY SMTP SERVICE
+       VERIFY EMAIL SERVICE
        -------------------------------------------------------
-       This verifies the SMTP connection.
+       IMPORTANT:
+       Email is now sent through the Brevo HTTPS API.
+       There is NO SMTP connection here.
+       
+       This performs an API credential check only.
        It does NOT send an email.
     ======================================================= */
 
-    let smtpReady = false;
+    let emailServiceReady = false;
 
     try {
-      smtpReady =
+      emailServiceReady =
         await verifyEmailTransport();
-    } catch (smtpError) {
+    } catch (emailError) {
       console.error(
-        "SMTP verification failed:",
-        smtpError
+        "Email service verification failed:",
+        emailError
       );
     }
 
-    if (smtpReady) {
+    if (emailServiceReady) {
       console.log(
         "Email service is ready."
       );
     } else {
       console.error(
-        "Email service is NOT ready. Email-dependent operations may fail."
+        "Email service is NOT ready. " +
+        "Email-dependent operations may fail."
       );
     }
 
@@ -160,9 +173,7 @@ async function startServer() {
           error
         );
 
-        if (
-          error.code === "EADDRINUSE"
-        ) {
+        if (error.code === "EADDRINUSE") {
           console.error(
             `Port ${PORT} is already in use.`
           );
@@ -178,9 +189,7 @@ async function startServer() {
 
     let isShuttingDown = false;
 
-    const shutdown = async (
-      signal
-    ) => {
+    const shutdown = async (signal) => {
       if (isShuttingDown) {
         return;
       }
@@ -196,30 +205,32 @@ async function startServer() {
       ----------------------------------------------------- */
 
       if (server) {
-        await new Promise(
-          (resolve) => {
-            server.close(
-              (error) => {
-                if (error) {
-                  console.error(
-                    "Error while closing HTTP server:",
-                    error
-                  );
-                } else {
-                  console.log(
-                    "HTTP server closed."
-                  );
-                }
+        await new Promise((resolve) => {
+          server.close((error) => {
+            if (error) {
+              console.error(
+                "Error while closing HTTP server:",
+                error
+              );
+            } else {
+              console.log(
+                "HTTP server closed."
+              );
+            }
 
-                resolve();
-              }
-            );
-          }
-        );
+            resolve();
+          });
+        });
       }
 
       /* -----------------------------------------------------
-         CLOSE SMTP TRANSPORT
+         CLOSE EMAIL SERVICE
+         -----------------------------------------------------
+         Brevo API uses HTTPS requests and does not maintain
+         a persistent SMTP transporter.
+
+         closeEmailTransport() is kept for compatibility with
+         the existing server architecture.
       ----------------------------------------------------- */
 
       try {
@@ -234,6 +245,10 @@ async function startServer() {
           emailError
         );
       }
+
+      /* -----------------------------------------------------
+         EXIT PROCESS
+      ----------------------------------------------------- */
 
       process.exit(0);
     };
@@ -267,7 +282,7 @@ async function startServer() {
     console.error(error);
 
     /* -------------------------------------------------------
-       CLOSE SMTP IF STARTUP FAILED
+       CLOSE EMAIL SERVICE IF STARTUP FAILED
     ------------------------------------------------------- */
 
     try {
@@ -292,4 +307,3 @@ async function startServer() {
 ========================================================= */
 
 void startServer();
-
