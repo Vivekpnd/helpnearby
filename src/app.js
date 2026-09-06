@@ -41,24 +41,71 @@ const {
 
 const app = express();
 
+/*
+ * IMPORTANT FOR RENDER / REVERSE PROXY
+ *
+ * Render places the application behind a reverse proxy.
+ * This allows Express and express-rate-limit to correctly
+ * process X-Forwarded-For and determine the client IP.
+ *
+ * Do NOT remove this in production.
+ */
+app.set("trust proxy", 1);
+
 /* =========================================================
    SECURITY
 ========================================================= */
 
 app.use(
-  helmet()
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
 );
 
 /* =========================================================
    CORS
 ========================================================= */
 
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "*",
-    credentials: true,
-  })
-);
+/*
+ * CLIENT_URL should contain your frontend/mobile-web origin
+ * when applicable.
+ *
+ * Example:
+ *
+ * CLIENT_URL=https://your-frontend.com
+ *
+ * For React Native native requests, CORS generally does not
+ * apply in the same way as a browser.
+ */
+
+const configuredClientUrl =
+  process.env.CLIENT_URL?.trim();
+
+if (configuredClientUrl) {
+  app.use(
+    cors({
+      origin: configuredClientUrl,
+      credentials: true,
+    })
+  );
+} else {
+  /*
+   * No browser frontend has been configured.
+   *
+   * This keeps the API reachable while avoiding:
+   *
+   * origin: "*"
+   * credentials: true
+   *
+   * which is invalid for credentialed browser requests.
+   */
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+    })
+  );
+}
 
 /* =========================================================
    BODY PARSING
@@ -89,10 +136,16 @@ app.use(
    HEALTH CHECK
 ========================================================= */
 
+/*
+ * GET /api/health
+ *
+ * Used by Render and manual browser/Postman testing.
+ */
+
 app.get(
   "/api/health",
   (req, res) => {
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Help Platform API is running",
     });
@@ -104,8 +157,20 @@ app.get(
 ========================================================= */
 
 /*
+ * ---------------------------------------------------------
  * Authentication
+ * ---------------------------------------------------------
+ *
+ * POST /api/auth/register
+ * POST /api/auth/login
+ * POST /api/auth/register/verify-email
+ * POST /api/auth/forgot-password
+ * POST /api/auth/reset-password
+ *
+ * Authentication routes are protected by the auth
+ * rate limiter.
  */
+
 app.use(
   "/api/auth",
   authRateLimit,
@@ -113,50 +178,71 @@ app.use(
 );
 
 /*
+ * ---------------------------------------------------------
  * Users
+ * ---------------------------------------------------------
  */
+
 app.use(
   "/api/users",
   userRoutes
 );
 
 /*
+ * ---------------------------------------------------------
  * Help Requests
+ * ---------------------------------------------------------
  */
+
 app.use(
   "/api/help-requests",
   helpRequestRoutes
 );
 
 /*
+ * ---------------------------------------------------------
  * Ratings
+ * ---------------------------------------------------------
  */
+
 app.use(
   "/api/ratings",
   ratingRoutes
 );
 
 /*
+ * ---------------------------------------------------------
  * Rewards
+ * ---------------------------------------------------------
  */
+
 app.use(
   "/api/rewards",
   rewardRoutes
 );
 
 /*
+ * ---------------------------------------------------------
  * Points
+ * ---------------------------------------------------------
  */
+
 app.use(
   "/api/points",
   pointRoutes
 );
 
 /*
+ * ---------------------------------------------------------
  * Image Uploads
+ * ---------------------------------------------------------
  *
  * POST /api/uploads/image
+ *
+ * The upload route itself is responsible for authentication
+ * and multipart/form-data handling.
  */
+
 app.use(
   "/api/uploads",
   uploadRoutes
@@ -168,7 +254,7 @@ app.use(
 
 app.use(
   (req, res) => {
-    res.status(404).json({
+    return res.status(404).json({
       success: false,
       message: `Route not found: ${req.method} ${req.originalUrl}`,
     });
@@ -181,27 +267,79 @@ app.use(
 
 app.use(
   (err, req, res, next) => {
+    /*
+     * Prevent unused-parameter lint issues while keeping
+     * Express error-handler signature intact.
+     */
+    void next;
+
     console.error(
       "Unhandled application error:",
-      err
+      {
+        name: err?.name,
+        message: err?.message,
+        code: err?.code,
+        statusCode:
+          err?.statusCode ||
+          err?.status,
+      }
     );
 
-    /*
-     * Multer errors
-     */
+    /* -----------------------------------------------------
+       Multer errors
+    ----------------------------------------------------- */
+
     if (
       err &&
       err.name === "MulterError"
     ) {
       return res.status(400).json({
         success: false,
-        message: err.message || "File upload error.",
+        message:
+          err.message ||
+          "File upload error.",
       });
     }
 
-    /*
-     * Generic application errors
-     */
+    /* -----------------------------------------------------
+       JSON parsing errors
+    ----------------------------------------------------- */
+
+    if (
+      err &&
+      err instanceof SyntaxError &&
+      err.status === 400 &&
+      err.type === "entity.parse.failed"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid JSON request body.",
+      });
+    }
+
+    /* -----------------------------------------------------
+       Payload too large
+    ----------------------------------------------------- */
+
+    if (
+      err &&
+      (
+        err.type === "entity.too.large" ||
+        err.status === 413
+      )
+    ) {
+      return res.status(413).json({
+        success: false,
+        message:
+          "Request payload is too large.",
+      });
+    }
+
+    /* -----------------------------------------------------
+       Generic application errors
+    ----------------------------------------------------- */
+
     const statusCode =
       Number(err?.statusCode) ||
       Number(err?.status) ||
@@ -226,4 +364,3 @@ app.use(
 ========================================================= */
 
 module.exports = app;
-
